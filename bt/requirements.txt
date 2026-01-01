@@ -1,0 +1,7 @@
+yfinance
+pandas
+toml
+tqdm
+requests
+backtrader
+llama-cpp-python

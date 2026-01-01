@@ -1,0 +1,16 @@
+[download]
+target_dir = "commodity_data"
+start_date = "2012-01-01"
+proxy_http = "http://127.0.0.1:7890"
+proxy_https = "http://127.0.0.1:7890"
+
+[commodities]
+Gold = "GC=F"
+Silver = "SI=F"
+Copper = "HG=F"
+Platinum = "PL=F"
+Palladium = "PA=F"
+Iron_Ore = "TI=F"
+DJI = "^DJI"
+SP500 = "^GSPC"
+NASDAQ = "^IXIC"
