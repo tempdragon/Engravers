@@ -11,6 +11,17 @@ news_file = "news.csv"
 news_func = "get_news"
 
 [llm]
-model_path = "model.gguf"
-model_type = "standard" # or "reasoning"
+# Single model example:
+# model_path = "model.gguf"
+# model_type = "standard"
+
+# Multiple agents example (Voting Mode):
+# Voting Logic:
+# - Each agent votes: BUY=1, SELL=-1, HOLD=0
+# - Votes are averaged.
+# - Decision: BUY if avg > 0.5, SELL if avg < -0.5, else HOLD.
+model_path = ["model1.gguf", "model2.gguf", "model3.gguf"]
+model_type = ["standard", "reasoning", "standard"] 
+# If only one type is provided for multiple paths, it applies to all.
+
 context_window = 2048
