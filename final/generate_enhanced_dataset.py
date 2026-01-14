@@ -6,6 +6,7 @@ from unsloth import FastLanguageModel
 from tqdm import tqdm
 import json
 import os
+import argparse
 from datetime import timedelta
 
 # ================= Configuration =================
@@ -16,10 +17,13 @@ OUTPUT_FILE = "gold_llm_enhanced_train.jsonl"
 # Input files
 NEWS_FILE = "gold_news_10years.csv"
 SCORED_FILE = "gold_training_data_scored.csv" # Using this for Ground Truth labels
+CACHE_FILE = "commodity_data/gold.csv"
 
 # Date Range (Aligned with previous notebook)
 START_DATE = "2020-01-01"
 END_DATE = "2025-12-31"
+DOWNLOAD_END_DATE = "2026-01-10" # Constant for data fetching limit
+ENABLE_DOWNLOAD = False # Set to True to enable yfinance downloading
 
 # ================= 1. Helper Functions for Tech Indicators =================
 def compute_technical_indicators(df):
@@ -69,10 +73,52 @@ def prepare_data():
     
     # 2.3 Fetch Technical Data First (to determine valid Trading Days)
     print("Fetching Market Data (Gold)...")
-    gold = yf.download("GC=F", start=START_DATE, end=END_DATE, progress=False)
-    # yfinance returns MultiIndex columns in recent versions, flattening just in case
-    if isinstance(gold.columns, pd.MultiIndex):
-        gold.columns = gold.columns.get_level_values(0)
+    
+    gold = None
+    if os.path.exists(CACHE_FILE):
+        print(f"Loading Market Data from: {CACHE_FILE}")
+        gold = pd.read_csv(CACHE_FILE, index_col=0, parse_dates=True)
+        if not isinstance(gold.index, pd.DatetimeIndex):
+            gold.index = pd.to_datetime(gold.index)
+        
+        last_date = gold.index.max()
+        required_end = pd.to_datetime(DOWNLOAD_END_DATE)
+        
+        print(f"Local data ends at: {last_date}")
+        
+        if last_date < required_end:
+                 if ENABLE_DOWNLOAD:
+                    print(f"Local data insufficient. Downloading missing range: {last_date} to {DOWNLOAD_END_DATE}...")
+                    try:
+                        start_missing = last_date + timedelta(days=1)
+                        if start_missing <= required_end:
+                            new_data = yf.download("GC=F", start=start_missing, end=DOWNLOAD_END_DATE, progress=False)
+                            
+                            if isinstance(new_data.columns, pd.MultiIndex):
+                                new_data.columns = new_data.columns.get_level_values(0)
+                            
+                            if not new_data.empty:
+                                gold = pd.concat([gold, new_data])
+                                gold = gold[~gold.index.duplicated(keep='last')]
+                                print(f"Updated data with {len(new_data)} new rows.")
+                                # Save
+                                gold.to_csv(CACHE_FILE)
+                    except Exception as e:
+                        print(f"Warning: Failed to update data: {e}")
+                 else:
+                     if last_date < pd.to_datetime(END_DATE):
+                         raise RuntimeError(f"Local data insufficient (Ends {last_date}). Downloading disabled.")
+                     print("Local data is sufficient for generation range.")
+    
+    if gold is None:
+         if not ENABLE_DOWNLOAD:
+             raise RuntimeError(f"No local data at {CACHE_FILE} and downloading disabled.")
+         print("Downloading Market Data...")
+         gold = yf.download("GC=F", start=START_DATE, end=DOWNLOAD_END_DATE, progress=False)
+         if isinstance(gold.columns, pd.MultiIndex):
+            gold.columns = gold.columns.get_level_values(0)
+         os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
+         gold.to_csv(CACHE_FILE)
     
     # Calculate Indicators
     gold = compute_technical_indicators(gold)
@@ -247,4 +293,11 @@ If your analysis contradicts the market reality, provide a reflection.
     print("Done!")
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Generate Enhanced Dataset")
+    parser.add_argument("--enable-download", action="store_true", help="Enable downloading market data via yfinance")
+    args = parser.parse_args()
+    
+    if args.enable_download:
+        ENABLE_DOWNLOAD = True
+
     generate_enhanced_dataset()

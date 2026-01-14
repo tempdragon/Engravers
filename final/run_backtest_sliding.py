@@ -6,13 +6,17 @@ from unsloth import FastLanguageModel
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import os
+import argparse
 from datetime import timedelta
 
 # ================= Configuration =================
 MODEL_PATH = "llama3_gold_quant_checkpoint" 
 NEWS_FILE = "gold_news_10years.csv"
+CACHE_FILE = "commodity_data/gold.csv"
 START_DATE = "2025-09-01" # Q4 Backtest
 END_DATE = "2025-12-31"
+DOWNLOAD_END_DATE = "2026-01-10" # Constant for data fetching limit
+ENABLE_DOWNLOAD = False # Set to True to enable yfinance downloading. False forces usage of cache or local CSVs.
 WINDOW_SIZE = 3 # Number of past days to include in context
 
 # ================= 1. Helper Functions (Legacy + Enhanced) =================
@@ -63,9 +67,62 @@ def prepare_daily_data():
     df_news['Date'] = pd.to_datetime(df_news['Date'])
     
     # 2. Load Market Data
-    gold = yf.download("GC=F", start="2025-08-01", end="2026-01-10", progress=False)
-    if isinstance(gold.columns, pd.MultiIndex):
-        gold.columns = gold.columns.get_level_values(0)
+    print(f"Checking Market Data at: {CACHE_FILE}")
+    gold = None
+    
+    # Try to load existing data
+    if os.path.exists(CACHE_FILE):
+        try:
+            gold = pd.read_csv(CACHE_FILE, index_col=0, parse_dates=True)
+            if not isinstance(gold.index, pd.DatetimeIndex):
+                gold.index = pd.to_datetime(gold.index)
+            
+            last_date = gold.index.max()
+            print(f"Local data ends at: {last_date}")
+            
+            required_end = pd.to_datetime(DOWNLOAD_END_DATE)
+            
+            # Check if update is needed
+            if last_date < required_end:
+                if ENABLE_DOWNLOAD:
+                    print(f"Local data stale. Downloading {last_date} -> {DOWNLOAD_END_DATE}...")
+                    start_missing = last_date + timedelta(days=1)
+                    if start_missing <= required_end:
+                        try:
+                            new_data = yf.download("GC=F", start=start_missing, end=DOWNLOAD_END_DATE, progress=False)
+                            if isinstance(new_data.columns, pd.MultiIndex):
+                                new_data.columns = new_data.columns.get_level_values(0)
+                            
+                            if not new_data.empty:
+                                gold = pd.concat([gold, new_data])
+                                gold = gold[~gold.index.duplicated(keep='last')]
+                                gold.to_csv(CACHE_FILE)
+                                print(f"Updated and saved to {CACHE_FILE}")
+                        except Exception as e:
+                            print(f"Update failed: {e}")
+                else:
+                    if last_date < pd.to_datetime(END_DATE):
+                         raise RuntimeError(f"Local data ends {last_date}, need {END_DATE}. Download disabled.")
+                    print("Local data sufficient for backtest.")
+        except Exception as e:
+            print(f"Error reading cache: {e}")
+            gold = None
+
+    # If no data found or read failed, download full
+    if gold is None:
+        if not ENABLE_DOWNLOAD:
+            raise RuntimeError(f"No valid data at {CACHE_FILE} and download disabled.")
+        
+        print("Downloading full history...")
+        gold = yf.download("GC=F", start="2020-01-01", end=DOWNLOAD_END_DATE, progress=False)
+        if isinstance(gold.columns, pd.MultiIndex):
+            gold.columns = gold.columns.get_level_values(0)
+        
+        os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
+        gold.to_csv(CACHE_FILE)
+        print(f"Saved to {CACHE_FILE}")
+
+    # Calculate Indicators
     gold = compute_technical_indicators(gold)
     valid_dates = pd.DatetimeIndex(gold.index).normalize()
     
@@ -281,4 +338,11 @@ Memory_Update: [Brief Summary]"""
     print(f"🚀 Final Strategy Return: {final_ret*100:.2f}%")
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run Sliding Window Backtest")
+    parser.add_argument("--enable-download", action="store_true", help="Enable downloading market data via yfinance")
+    args = parser.parse_args()
+    
+    if args.enable_download:
+        ENABLE_DOWNLOAD = True
+        
     run_backtest()
