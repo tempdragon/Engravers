@@ -150,10 +150,17 @@ def prepare_data():
     # Logic: If price rises tomorrow, today's sentiment regarding future prospect is Bullish.
     gold['Next_Ret'] = gold['Close'].pct_change().shift(-1)
     
+    # Drop the last row where Next_Ret is NaN (we can't train on the last day without future data)
+    gold = gold.dropna(subset=['Next_Ret'])
+    
     # Map Return to Score (-5 to +5)
     # Assumption: 1% move is a "strong" move (Score ~5)
     # Factor = 500 (0.01 * 500 = 5)
-    gold['Calculated_Score'] = np.clip(gold['Next_Ret'] * 500, -5, 5).fillna(0)
+    gold['Calculated_Score'] = np.clip(gold['Next_Ret'] * 500, -5, 5)
+
+    # Ensure index is timezone-naive for merging
+    if gold.index.tz is not None:
+        gold.index = gold.index.tz_localize(None)
 
     # Create an index of valid trading dates
     valid_trading_dates = pd.DatetimeIndex(gold.index).normalize()
