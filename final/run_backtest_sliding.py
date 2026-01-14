@@ -9,15 +9,24 @@ import os
 import argparse
 from datetime import timedelta
 
-# ================= Configuration =================
-MODEL_PATH = "llama3_gold_quant_checkpoint" 
-NEWS_FILE = "gold_news_10years.csv"
-CACHE_FILE = "commodity_data/gold.csv"
-START_DATE = "2025-09-01" # Q4 Backtest
-END_DATE = "2025-12-31"
-DOWNLOAD_END_DATE = "2026-01-10" # Constant for data fetching limit
-ENABLE_DOWNLOAD = False # Set to True to enable yfinance downloading. False forces usage of cache or local CSVs.
-WINDOW_SIZE = 3 # Number of past days to include in context
+# ================= Configuration Defaults =================
+DEFAULT_MODEL_PATH = "/home/dragon/AI/llama-3-8B-4bit-finance" 
+DEFAULT_NEWS_FILE = "gold_news_10years.csv"
+DEFAULT_CACHE_FILE = "commodity_data/gold.csv"
+DEFAULT_START_DATE = "2025-09-01" # Q4 Backtest
+DEFAULT_END_DATE = "2025-12-31"
+DEFAULT_DOWNLOAD_END_DATE = "2026-01-10"
+DEFAULT_WINDOW_SIZE = 3 
+
+# Global variables to be populated by args
+MODEL_PATH = DEFAULT_MODEL_PATH
+NEWS_FILE = DEFAULT_NEWS_FILE
+CACHE_FILE = DEFAULT_CACHE_FILE
+START_DATE = DEFAULT_START_DATE
+END_DATE = DEFAULT_END_DATE
+DOWNLOAD_END_DATE = DEFAULT_DOWNLOAD_END_DATE
+WINDOW_SIZE = DEFAULT_WINDOW_SIZE
+ENABLE_DOWNLOAD = False
 
 # ================= 1. Helper Functions (Legacy + Enhanced) =================
 def compute_technical_indicators(df):
@@ -340,9 +349,24 @@ Memory_Update: [Brief Summary]"""
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Sliding Window Backtest")
     parser.add_argument("--enable-download", action="store_true", help="Enable downloading market data via yfinance")
+    parser.add_argument("--model-path", type=str, default=DEFAULT_MODEL_PATH, help="Path to the model directory")
+    parser.add_argument("--news-file", type=str, default=DEFAULT_NEWS_FILE, help="Path to the news CSV file")
+    parser.add_argument("--cache-file", type=str, default=DEFAULT_CACHE_FILE, help="Path to the gold price cache CSV")
+    parser.add_argument("--start-date", type=str, default=DEFAULT_START_DATE, help="Start date for backtest (YYYY-MM-DD)")
+    parser.add_argument("--end-date", type=str, default=DEFAULT_END_DATE, help="End date for backtest (YYYY-MM-DD)")
+    parser.add_argument("--download-end-date", type=str, default=DEFAULT_DOWNLOAD_END_DATE, help="End date for data downloading")
+    parser.add_argument("--window-size", type=int, default=DEFAULT_WINDOW_SIZE, help="Sliding window size in days")
+
     args = parser.parse_args()
     
-    if args.enable_download:
-        ENABLE_DOWNLOAD = True
+    # Update globals
+    ENABLE_DOWNLOAD = args.enable_download
+    MODEL_PATH = args.model_path
+    NEWS_FILE = args.news_file
+    CACHE_FILE = args.cache_file
+    START_DATE = args.start_date
+    END_DATE = args.end_date
+    DOWNLOAD_END_DATE = args.download_end_date
+    WINDOW_SIZE = args.window_size
         
     run_backtest()

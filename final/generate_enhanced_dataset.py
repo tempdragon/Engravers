@@ -9,21 +9,26 @@ import os
 import argparse
 from datetime import timedelta
 
-# ================= Configuration =================
-# Previous model path
-MODEL_PATH = "llama3_gold_quant_checkpoint" 
-# Output file
-OUTPUT_FILE = "gold_llm_enhanced_train.jsonl"
-# Input files
-NEWS_FILE = "gold_news_10years.csv"
-SCORED_FILE = "gold_training_data_scored.csv" # Using this for Ground Truth labels
-CACHE_FILE = "commodity_data/gold.csv"
+# ================= Configuration Defaults =================
+DEFAULT_MODEL_PATH = "/home/dragon/AI/llama-3-8B-4bit-finance" 
+DEFAULT_OUTPUT_FILE = "gold_llm_enhanced_train.jsonl"
+DEFAULT_NEWS_FILE = "gold_news_10years.csv"
+DEFAULT_SCORED_FILE = "gold_training_data_scored.csv" 
+DEFAULT_CACHE_FILE = "commodity_data/gold.csv"
+DEFAULT_START_DATE = "2020-01-01"
+DEFAULT_END_DATE = "2025-12-31"
+DEFAULT_DOWNLOAD_END_DATE = "2026-01-10"
 
-# Date Range (Aligned with previous notebook)
-START_DATE = "2020-01-01"
-END_DATE = "2025-12-31"
-DOWNLOAD_END_DATE = "2026-01-10" # Constant for data fetching limit
-ENABLE_DOWNLOAD = False # Set to True to enable yfinance downloading
+# Global variables to be populated by args
+MODEL_PATH = DEFAULT_MODEL_PATH
+OUTPUT_FILE = DEFAULT_OUTPUT_FILE
+NEWS_FILE = DEFAULT_NEWS_FILE
+SCORED_FILE = DEFAULT_SCORED_FILE
+CACHE_FILE = DEFAULT_CACHE_FILE
+START_DATE = DEFAULT_START_DATE
+END_DATE = DEFAULT_END_DATE
+DOWNLOAD_END_DATE = DEFAULT_DOWNLOAD_END_DATE
+ENABLE_DOWNLOAD = False
 
 # ================= 1. Helper Functions for Tech Indicators =================
 def compute_technical_indicators(df):
@@ -295,9 +300,26 @@ If your analysis contradicts the market reality, provide a reflection.
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate Enhanced Dataset")
     parser.add_argument("--enable-download", action="store_true", help="Enable downloading market data via yfinance")
+    parser.add_argument("--model-path", type=str, default=DEFAULT_MODEL_PATH, help="Path to the model directory")
+    parser.add_argument("--output-file", type=str, default=DEFAULT_OUTPUT_FILE, help="Path to output JSONL file")
+    parser.add_argument("--news-file", type=str, default=DEFAULT_NEWS_FILE, help="Path to news CSV file")
+    parser.add_argument("--scored-file", type=str, default=DEFAULT_SCORED_FILE, help="Path to scored training data CSV")
+    parser.add_argument("--cache-file", type=str, default=DEFAULT_CACHE_FILE, help="Path to gold price cache CSV")
+    parser.add_argument("--start-date", type=str, default=DEFAULT_START_DATE, help="Start date (YYYY-MM-DD)")
+    parser.add_argument("--end-date", type=str, default=DEFAULT_END_DATE, help="End date (YYYY-MM-DD)")
+    parser.add_argument("--download-end-date", type=str, default=DEFAULT_DOWNLOAD_END_DATE, help="End date for data downloading")
+
     args = parser.parse_args()
     
-    if args.enable_download:
-        ENABLE_DOWNLOAD = True
+    # Update globals
+    ENABLE_DOWNLOAD = args.enable_download
+    MODEL_PATH = args.model_path
+    OUTPUT_FILE = args.output_file
+    NEWS_FILE = args.news_file
+    SCORED_FILE = args.scored_file
+    CACHE_FILE = args.cache_file
+    START_DATE = args.start_date
+    END_DATE = args.end_date
+    DOWNLOAD_END_DATE = args.download_end_date
 
     generate_enhanced_dataset()
