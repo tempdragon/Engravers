@@ -9,6 +9,9 @@ import os
 import argparse
 from datetime import timedelta
 
+# Force offline mode for Hugging Face
+os.environ["HF_HUB_OFFLINE"] = "1"
+
 # ================= Configuration Defaults =================
 DEFAULT_MODEL_PATH = "/home/dragon/AI/llama-3-8B-4bit-finance"
 DEFAULT_OUTPUT_FILE = "final/gold_llm_enhanced_train.jsonl"
