@@ -335,26 +335,70 @@ Analysis:
         )
 
         if diff > 2.0:  # Threshold for "Too Different"
-            # Generate Reflection (Correction) using LLM
-            ref_prompt = reflection_template.format(
-                pred_score=pred_score,
-                true_score=true_score,
-                trend=trend,
-                tech_context=tech_context,
-                input_text=input_text
+            # Generate Reflection (Correction) using LLM in 3 SEPARATE steps
+
+            # Step A: Technical Reflection
+            tech_prompt = f"""### Instruction:
+You are a Senior Technical Analyst.
+The AI model predicted {pred_score}, but the Actual Market Score was {true_score:.2f} (Trend: {trend}).
+Analyze the Technical Indicators ONLY.
+Explain if the Technical Context ({tech_context}) signaled a move that overpowered the news.
+
+### Input:
+{tech_str}
+
+### Response:
+Technical Analysis:
+"""
+            t_inputs = tokenizer([tech_prompt], return_tensors="pt").to("cuda")
+            t_outputs = model.generate(**t_inputs, max_new_tokens=150, use_cache=True)
+            t_text = tokenizer.batch_decode(t_outputs, skip_special_tokens=True)[0]
+            tech_analysis = t_text.split("### Response:")[-1].strip()
+
+            # Step B: News Reflection
+            news_prompt = f"""### Instruction:
+You are a Senior Macro Analyst.
+The AI model predicted {pred_score}, but the Actual Market Score was {true_score:.2f} (Trend: {trend}).
+Analyze the News Headlines ONLY.
+Explain why the news might have been priced in, ignored, or interpreted differently by the market.
+
+### Input:
+{row['News_Text']}
+
+### Response:
+News Analysis:
+"""
+            n_inputs = tokenizer([news_prompt], return_tensors="pt").to("cuda")
+            n_outputs = model.generate(**n_inputs, max_new_tokens=150, use_cache=True)
+            n_text = tokenizer.batch_decode(n_outputs, skip_special_tokens=True)[0]
+            news_analysis = n_text.split("### Response:")[-1].strip()
+
+            # Step C: Merged Conclusion
+            merge_prompt = f"""### Instruction:
+You are a Chief Investment Officer.
+Synthesize the Technical and News analysis below to explain why the market moved as it did (Score: {true_score:.2f}).
+
+### Input:
+{tech_analysis}
+{news_analysis}
+
+### Response:
+Merged Conclusion:
+"""
+            m_inputs = tokenizer([merge_prompt], return_tensors="pt").to("cuda")
+            m_outputs = model.generate(**m_inputs, max_new_tokens=150, use_cache=True)
+            m_text = tokenizer.batch_decode(m_outputs, skip_special_tokens=True)[0]
+            merged_analysis = m_text.split("### Response:")[-1].strip()
+
+            generated_reflection = (
+                f"[Reflection]\n"
+                f"Model Prediction: {pred_score}\n"
+                f"Actual Market Score: {true_score:.2f} ({trend})\n"
+                f"Analysis:\n"
+                f"1. {tech_analysis}\n"
+                f"2. {news_analysis}\n"
+                f"3. {merged_analysis}"
             )
-            
-            # Run inference for reflection
-            ref_inputs = tokenizer([ref_prompt], return_tensors="pt").to("cuda")
-            ref_outputs = model.generate(**ref_inputs, max_new_tokens=300, use_cache=True)
-            ref_full_text = tokenizer.batch_decode(ref_outputs, skip_special_tokens=True)[0]
-            
-            # Extract the response part
-            try:
-                # The prompt ends with 'Analysis:\n', so the model generates the points.
-                generated_reflection = ref_full_text.split("### Response:")[-1].strip()
-            except:
-                generated_reflection = "[Reflection]\nError generating reflection."
                 
             final_response += f"\n\n{generated_reflection}"
         else:

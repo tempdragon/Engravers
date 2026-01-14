@@ -286,39 +286,49 @@ Reasoning:
 Score: [Your Score]
 Memory_Update: [Brief Summary]"""
 
-        # Inference
-        inputs = tokenizer([prompt], return_tensors="pt").to("cuda")
-        outputs = model.generate(
-            **inputs, max_new_tokens=256, use_cache=True
-        )  # Increased tokens for reasoning
-        out_text = tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
+        # Inference with Retry Mechanism
+        max_retries = 3
+        score = 0.0
+        
+        for attempt in range(max_retries):
+            inputs = tokenizer([prompt], return_tensors="pt").to("cuda")
+            outputs = model.generate(
+                **inputs, max_new_tokens=256, use_cache=True
+            )  # Increased tokens for reasoning
+            out_text = tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
 
-        # Parse Score & Memory
-        try:
-            response_part = out_text.split("### Response:")[-1].strip()
+            # Parse Score & Memory
+            try:
+                response_part = out_text.split("### Response:")[-1].strip()
 
-            # Parse Score - Adaptive search (finds "Score:" anywhere in response)
-            import re
-            
-            # Look for Score: X.X at the end or typically formatted
-            score_matches = list(re.finditer(r"Score:\s*(-?\d+(\.\d+)?)", response_part))
-            if score_matches:
-                # Use the last occurrence in case "Score" is mentioned in reasoning
-                score_match = score_matches[-1]
-                score = float(score_match.group(1))
-            else:
+                # Parse Score - Adaptive search (finds "Score:" anywhere in response)
+                import re
+                
+                # Look for Score: X.X at the end or typically formatted
+                score_matches = list(re.finditer(r"Score:\s*(-?\d+(\.\d+)?)", response_part))
+                if score_matches:
+                    # Use the last occurrence in case "Score" is mentioned in reasoning
+                    score_match = score_matches[-1]
+                    score = float(score_match.group(1))
+                    
+                    # Parse Memory Update (only if score found)
+                    memory_match = re.search(r"Memory_Update:(.*)", response_part, re.DOTALL)
+                    if memory_match:
+                        new_memory = memory_match.group(1).strip()
+                        # Safety check: Prevent memory from exploding or becoming empty noise
+                        if len(new_memory) > 10 and "Score" not in new_memory:
+                            # Truncate to ~200 chars as requested
+                            long_term_memory = new_memory[:250]
+                            
+                    # Success, break loop
+                    break
+                else:
+                    print(f"  [Warning] No score found (Attempt {attempt+1}/{max_retries}). Retrying...")
+                    score = 0.0 # Reset for retry
+                    
+            except Exception as e:
+                print(f"  [Error] Parsing failed: {e} (Attempt {attempt+1}/{max_retries}). Retrying...")
                 score = 0.0
-
-            # Parse Memory Update
-            memory_match = re.search(r"Memory_Update:(.*)", response_part, re.DOTALL)
-            if memory_match:
-                new_memory = memory_match.group(1).strip()
-                # Safety check: Prevent memory from exploding or becoming empty noise
-                if len(new_memory) > 10 and "Score" not in new_memory:
-                    # Truncate to ~200 chars as requested
-                    long_term_memory = new_memory[:250]
-        except:
-            score = 0.0
 
         results.append(
             {"Date": current_date, "Score": score, "Memory_State": long_term_memory}
