@@ -30,6 +30,7 @@ START_DATE = DEFAULT_START_DATE
 END_DATE = DEFAULT_END_DATE
 DOWNLOAD_END_DATE = DEFAULT_DOWNLOAD_END_DATE
 ENABLE_DOWNLOAD = False
+DEBUG_MODE = False  # Default debug mode
 
 
 # ================= 1. Helper Functions for Tech Indicators =================
@@ -80,9 +81,9 @@ def prepare_data():
     # Load raw news
     if not os.path.exists(NEWS_FILE):
         raise FileNotFoundError(f"News file not found: {NEWS_FILE}")
-        
+
     df_news = pd.read_csv(NEWS_FILE)
-    
+
     # 2.3 Fetch Technical Data First (to determine valid Trading Days)
     print("Fetching Market Data (Gold)...")
 
@@ -107,12 +108,14 @@ def prepare_data():
                     # Check if we need history BEFORE current local start (e.g. for indicators)
                     req_start = pd.Timestamp(START_DATE)
                     lookback_start = req_start - pd.Timedelta(days=365)
-                    
+
                     if gold.index.min() > lookback_start:
-                         print(f"Local data starts {gold.index.min()}, need {lookback_start}. Re-downloading full history...")
-                         start_missing = lookback_start
+                        print(
+                            f"Local data starts {gold.index.min()}, need {lookback_start}. Re-downloading full history..."
+                        )
+                        start_missing = lookback_start
                     else:
-                         start_missing = last_date + timedelta(days=1)
+                        start_missing = last_date + timedelta(days=1)
 
                     if start_missing <= required_end:
                         new_data = yf.download(
@@ -144,12 +147,14 @@ def prepare_data():
         # Determine effective start date (User Request - 365 Days for Indicators)
         req_start = pd.Timestamp(START_DATE)
         lookback_start = req_start - pd.Timedelta(days=365)
-        
+
         if not ENABLE_DOWNLOAD:
             raise RuntimeError(
                 f"No local data at {CACHE_FILE} and downloading disabled."
             )
-        print(f"Downloading Market Data (including history from {lookback_start.date()})...")
+        print(
+            f"Downloading Market Data (including history from {lookback_start.date()})..."
+        )
         gold = yf.download(
             "GC=F", start=lookback_start, end=DOWNLOAD_END_DATE, progress=False
         )
@@ -160,19 +165,19 @@ def prepare_data():
 
     # Calculate Indicators
     gold = compute_technical_indicators(gold)
-    
+
     # Calculate Ground Truth Labels from Price Returns (Look-ahead)
     # We use T+1 return to determine what the "correct" sentiment for today (T) should have been.
     # Logic: If price rises tomorrow, today's sentiment regarding future prospect is Bullish.
-    gold['Next_Ret'] = gold['Close'].pct_change().shift(-1)
-    
+    gold["Next_Ret"] = gold["Close"].pct_change().shift(-1)
+
     # Drop the last row where Next_Ret is NaN (we can't train on the last day without future data)
-    gold = gold.dropna(subset=['Next_Ret'])
-    
+    gold = gold.dropna(subset=["Next_Ret"])
+
     # Map Return to Score (-5 to +5)
     # Assumption: 1% move is a "strong" move (Score ~5)
     # Factor = 500 (0.01 * 500 = 5)
-    gold['Calculated_Score'] = np.clip(gold['Next_Ret'] * 500, -5, 5)
+    gold["Calculated_Score"] = np.clip(gold["Next_Ret"] * 500, -5, 5)
 
     # Ensure index is timezone-naive for merging
     if gold.index.tz is not None:
@@ -213,19 +218,17 @@ def prepare_data():
         for i, h in enumerate(headlines, 1):
             combined_news += f"{i}. {h}\n"
 
-        daily_data.append(
-            {"Date": date, "News_Text": combined_news}
-        )
+        daily_data.append({"Date": date, "News_Text": combined_news})
 
     df_daily = pd.DataFrame(daily_data)
     df_daily.set_index("Date", inplace=True)
-    
+
     # Merge News with Technicals (and Calculated Score)
     print("Merging News and Technicals...")
     df_final = df_daily.join(
         gold, how="inner"
     )  # Only keep days with both News + Trading
-    
+
     return df_final
 
 
@@ -329,10 +332,10 @@ Analysis:
 
         # Construct technical context string for the rationale
         # Simple trend logic for the text
-        trend = "bullish" if true_score > 1 else "bearish" if true_score < -1 else "neutral"
-        tech_context = (
-            f"RSI ({row['RSI']:.1f}) and BB %B ({row['Percent_B']:.2f})"
+        trend = (
+            "bullish" if true_score > 1 else "bearish" if true_score < -1 else "neutral"
         )
+        tech_context = f"RSI ({row['RSI']:.1f}) and BB %B ({row['Percent_B']:.2f})"
 
         if diff > 2.0:  # Threshold for "Too Different"
             # Generate Reflection (Correction) using LLM in 3 SEPARATE steps
@@ -343,6 +346,7 @@ You are a Senior Technical Analyst.
 The AI model predicted {pred_score}, but the Actual Market Score was {true_score:.2f} (Trend: {trend}).
 Analyze the Technical Indicators ONLY.
 Explain if the Technical Context ({tech_context}) signaled a move that overpowered the news.
+DO NOT OUTPUT "Scoring Rule" or dates. Provide a text analysis.
 
 ### Input:
 {tech_str}
@@ -361,6 +365,7 @@ You are a Senior Macro Analyst.
 The AI model predicted {pred_score}, but the Actual Market Score was {true_score:.2f} (Trend: {trend}).
 Analyze the News Headlines ONLY.
 Explain why the news might have been priced in, ignored, or interpreted differently by the market.
+DO NOT OUTPUT "Scoring Rule" or dates. Provide a LONG text analysis that REFERS TO THE NEWS and GIVE REASONS WHY the news didn't make the movement of the commodity move in the expected direction as well as what the analysis may have over or underestimated or ignored.
 
 ### Input:
 {row['News_Text']}
@@ -377,6 +382,7 @@ News Analysis:
             merge_prompt = f"""### Instruction:
 You are a Chief Investment Officer.
 Synthesize the Technical and News analysis below to explain why the market moved as it did (Score: {true_score:.2f}).
+DO NOT OUTPUT "Scoring Rule" or dates. Provide a text analysis.
 
 ### Input:
 {tech_analysis}
@@ -399,7 +405,21 @@ Merged Conclusion:
                 f"2. {news_analysis}\n"
                 f"3. {merged_analysis}"
             )
-                
+
+            # Debug Mode: Print reflection and exit on first failure
+            if DEBUG_MODE:
+                print("\n" + "=" * 50)
+                print(
+                    "🛑 DEBUG MODE: Stopped at first 'Failed Reflection' (Incorrect Prediction)"
+                )
+                print("=" * 50)
+                print(f"Date: {date.strftime('%Y-%m-%d')}")
+                print(f"Pred: {pred_score} | Actual: {true_score:.2f}")
+                print("-" * 20)
+                print(generated_reflection)
+                print("=" * 50 + "\n")
+                return  # Stop execution immediately
+
             final_response += f"\n\n{generated_reflection}"
         else:
             # Generate Rationale (Confirmation)
@@ -474,11 +494,17 @@ if __name__ == "__main__":
         default=DEFAULT_DOWNLOAD_END_DATE,
         help="End date for data downloading",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode: Stop after the first failed reflection generation",
+    )
 
     args = parser.parse_args()
 
     # Update globals
     ENABLE_DOWNLOAD = args.enable_download
+    DEBUG_MODE = args.debug
     MODEL_PATH = args.model_path
     OUTPUT_FILE = args.output_file
     NEWS_FILE = args.news_file
