@@ -15,7 +15,9 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 
 # ================= Configuration Defaults =================
 DEFAULT_MODEL_PATH = "/home/dragon/AI/llama-3-8B-4bit-finance"
-DEFAULT_REFLECTION_MODEL_PATH = "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
+DEFAULT_REFLECTION_MODEL_PATH = (
+    "~/.cache/modelscope/hub/models/unsloth/Meta-Llama-3.1-8B-Instruct-unsloth-bnb-4bit"
+)
 DEFAULT_OUTPUT_FILE = "final/gold_llm_enhanced_train.jsonl"
 DEFAULT_NEWS_FILE = "final/gold_news_10years.csv"
 DEFAULT_CACHE_FILE = "commodity_data/gold.csv"
@@ -239,9 +241,9 @@ def prepare_data():
 def generate_enhanced_dataset():
     # Load Data
     df = prepare_data()
-    
+
     intermediate_results = []
-    
+
     # -------------------------------------------------------------------------
     # PASS 1: Generate Scores with Finance Model
     # -------------------------------------------------------------------------
@@ -268,7 +270,7 @@ If your analysis contradicts the market reality, provide a reflection.
 
 ### Response:
 """
-    
+
     print("Generating scores...")
     for date, row in tqdm(df.iterrows(), total=len(df)):
         # Construct Input String
@@ -292,6 +294,7 @@ If your analysis contradicts the market reality, provide a reflection.
         try:
             pred_part = pred_text.split("### Response:")[-1].strip()
             import re
+
             match = re.search(r"Score:\s*(-?\d+(\.\d+)?)", pred_part)
             if match:
                 pred_score = float(match.group(1))
@@ -301,48 +304,49 @@ If your analysis contradicts the market reality, provide a reflection.
             pred_score = 0
 
         # Store for Pass 2
-        intermediate_results.append({
-            "date": date,
-            "row": row,
-            "input_text": input_text,
-            "pred_score": pred_score,
-            "true_score": row["Calculated_Score"],
-            "tech_str": tech_str,
-            "news_text": row["News_Text"]
-        })
-        
+        intermediate_results.append(
+            {
+                "date": date,
+                "row": row,
+                "input_text": input_text,
+                "pred_score": pred_score,
+                "true_score": row["Calculated_Score"],
+                "tech_str": tech_str,
+                "news_text": row["News_Text"],
+            }
+        )
+
         # In Debug Mode, just process one item for Pass 1 then break
         if DEBUG_MODE and len(intermediate_results) > 0:
-             # We want to find a FAIL case for debug. If prediction is close, skip/continue until fail?
-             # User asked to "Stopped at first 'Failed Reflection'".
-             # So we need to check condition here.
-             diff = abs(pred_score - row["Calculated_Score"])
-             if diff > 2.0:
-                 print("Found a failure case for debug. Stopping Pass 1.")
-                 break
-             else:
-                 # If passing, clear list and continue searching? 
-                 # Or keep collecting until we hit a fail? 
-                 # Let's keep collecting, but we only really need the LAST one if we break.
-                 # Actually, for debug mode efficiency, let's just find the first failure.
-                 if len(intermediate_results) > 10: # Safety break if model is too good
-                     print("Model too good or no failures in first 10. Stopping Pass 1.")
-                     break
-                 
-    
+            # We want to find a FAIL case for debug. If prediction is close, skip/continue until fail?
+            # User asked to "Stopped at first 'Failed Reflection'".
+            # So we need to check condition here.
+            diff = abs(pred_score - row["Calculated_Score"])
+            if diff > 2.0:
+                print("Found a failure case for debug. Stopping Pass 1.")
+                break
+            else:
+                # If passing, clear list and continue searching?
+                # Or keep collecting until we hit a fail?
+                # Let's keep collecting, but we only really need the LAST one if we break.
+                # Actually, for debug mode efficiency, let's just find the first failure.
+                if len(intermediate_results) > 10:  # Safety break if model is too good
+                    print("Model too good or no failures in first 10. Stopping Pass 1.")
+                    break
+
     # FREE MEMORY
     print("\nUnloading Finance Model to free VRAM...")
     del model
     del tokenizer
     torch.cuda.empty_cache()
     gc.collect()
-    
+
     # -------------------------------------------------------------------------
     # PASS 2: Generate Reflections with Base Model
     # -------------------------------------------------------------------------
     print(f"\n[Pass 2/2] Loading Reflection Model from {REFLECTION_MODEL_PATH}...")
     try:
-         model, tokenizer = FastLanguageModel.from_pretrained(
+        model, tokenizer = FastLanguageModel.from_pretrained(
             model_name=REFLECTION_MODEL_PATH,
             max_seq_length=2048,
             dtype=None,
@@ -350,7 +354,9 @@ If your analysis contradicts the market reality, provide a reflection.
             local_files_only=True,
         )
     except Exception as e:
-        print(f"Failed to load reflection model {REFLECTION_MODEL_PATH} with local_files_only=True: {e}")
+        print(
+            f"Failed to load reflection model {REFLECTION_MODEL_PATH} with local_files_only=True: {e}"
+        )
         print("Retrying without local_files_only restriction...")
         try:
             model, tokenizer = FastLanguageModel.from_pretrained(
@@ -360,13 +366,13 @@ If your analysis contradicts the market reality, provide a reflection.
                 load_in_4bit=True,
             )
         except Exception as e2:
-             print(f"Failed to load reflection model again: {e2}")
-             return # Cannot proceed
+            print(f"Failed to load reflection model again: {e2}")
+            return  # Cannot proceed
 
     FastLanguageModel.for_inference(model)
-    
+
     final_dataset = []
-    
+
     print("Generating reflections...")
     for item in tqdm(intermediate_results):
         pred_score = item["pred_score"]
@@ -374,14 +380,16 @@ If your analysis contradicts the market reality, provide a reflection.
         row = item["row"]
         tech_str = item["tech_str"]
         news_text = item["news_text"]
-        
+
         diff = abs(pred_score - true_score)
-        
-        trend = "bullish" if true_score > 1 else "bearish" if true_score < -1 else "neutral"
+
+        trend = (
+            "bullish" if true_score > 1 else "bearish" if true_score < -1 else "neutral"
+        )
         tech_context = f"RSI ({row['RSI']:.1f}) and BB %B ({row['Percent_B']:.2f})"
-        
+
         final_response = f"Score: {true_score:.2f}"
-        
+
         if diff > 2.0:
             # Step A: Technical Reflection
             tech_prompt = f"""### Instruction:
@@ -461,7 +469,7 @@ Merged Conclusion:
                 f"2. {news_analysis}\n"
                 f"3. {merged_analysis}"
             )
-            
+
             if DEBUG_MODE:
                 print("\n" + "=" * 50)
                 print("🛑 DEBUG MODE: Stopped at first 'Failed Reflection'")
@@ -471,10 +479,10 @@ Merged Conclusion:
                 print("-" * 20)
                 print(generated_reflection)
                 print("=" * 50 + "\n")
-                return 
+                return
 
             final_response += f"\n\n{generated_reflection}"
-        
+
         else:
             # Generate Rationale (Confirmation)
             rationale_note = (
@@ -484,7 +492,7 @@ Merged Conclusion:
                 f"3. Conclusion: Strong convergence between macro sentiment and technical structure."
             )
             final_response += rationale_note
-            
+
         entry = {
             "instruction": "You are a Macro Quant Strategist specializing in Gold (XAU/USD). Analyze the given news and technical indicators for the day. Provide a Daily Sentiment Score (-5 to +5) and technical rationale.",
             "input": item["input_text"],
