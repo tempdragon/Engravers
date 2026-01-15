@@ -520,6 +520,13 @@ Memory_Update: [Brief Summary]"""
                     
                     o_final = o_cum.iloc[-1] - 1
 
+                    print("-" * 20)
+                    print(f"📉 Original Strategy (5.1.4)")
+                    print(f"Sharpe: {o_sharpe:.2f}")
+                    print(f"Max Drawdown: {o_mdd:.2%}")
+                    print(f"Final Return: {o_final*100:.2f}%")
+                    print("-" * 20)
+
                     plt.plot(
                         orig_aligned.index,
                         o_cum,
