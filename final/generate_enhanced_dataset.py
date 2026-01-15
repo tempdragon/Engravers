@@ -393,7 +393,7 @@ If your analysis contradicts the market reality, provide a reflection.
             tech_prompt = f"""### Instruction:
 You are a Senior Technical Analyst.
 The AI model predicted {pred_score}, but the Actual Market Score was {true_score:.2f} (Trend: {trend}).
-Analyze the Technical Indicators ONLY.
+Analyze the Technical Indicators ONLY in a concise way (approx. 250 words).
 Explain if the Technical Context ({tech_context}) signaled a move that overpowered the news.
 DO NOT OUTPUT "Scoring Rule" or dates. Provide a text analysis.
 
@@ -404,7 +404,14 @@ DO NOT OUTPUT "Scoring Rule" or dates. Provide a text analysis.
 Technical Analysis:
 """
             t_inputs = tokenizer([tech_prompt], return_tensors="pt").to("cuda")
-            t_outputs = model.generate(**t_inputs, max_new_tokens=1024, use_cache=True)
+            t_outputs = model.generate(
+                **t_inputs, 
+                max_new_tokens=400, 
+                use_cache=True,
+                repetition_penalty=1.2,
+                temperature=0.7,
+                do_sample=True
+            )
             t_text = tokenizer.batch_decode(t_outputs, skip_special_tokens=True)[0]
             # Ensure "Technical Analysis:" prefix is preserved or re-added if missing from generation
             tech_gen = t_text.split("### Response:")[-1].strip()
@@ -417,9 +424,9 @@ Technical Analysis:
             news_prompt = f"""### Instruction:
 You are a Senior Macro Analyst.
 The AI model predicted {pred_score}, but the Actual Market Score was {true_score:.2f} (Trend: {trend}).
-Analyze the News Headlines ONLY.
+Analyze the News Headlines ONLY in a concise way (approx. 400 words).
 Explain why the news might have been priced in, ignored, or interpreted differently by the market.
-DO NOT OUTPUT "Scoring Rule" or dates. Provide a LONG text analysis that REFERS TO THE NEWS and GIVE REASONS WHY the news didn't make the movement of the commodity move in the expected direction as well as what the analysis may have over or underestimated or ignored.
+DO NOT OUTPUT "Scoring Rule" or dates. Provide a text analysis that REFERS TO THE NEWS and GIVE REASONS WHY the news didn't make the movement of the commodity move in the expected direction as well as what the analysis may have over or underestimated or ignored.
 
 ### Input:
 {news_text}
@@ -428,7 +435,14 @@ DO NOT OUTPUT "Scoring Rule" or dates. Provide a LONG text analysis that REFERS 
 News Analysis:
 """
             n_inputs = tokenizer([news_prompt], return_tensors="pt").to("cuda")
-            n_outputs = model.generate(**n_inputs, max_new_tokens=1024, use_cache=True)
+            n_outputs = model.generate(
+                **n_inputs, 
+                max_new_tokens=600, 
+                use_cache=True,
+                repetition_penalty=1.2,
+                temperature=0.7,
+                do_sample=True
+            )
             n_text = tokenizer.batch_decode(n_outputs, skip_special_tokens=True)[0]
             news_gen = n_text.split("### Response:")[-1].strip()
             if not news_gen.lower().startswith("news analysis"):
@@ -439,18 +453,28 @@ News Analysis:
             # Step C: Merged Conclusion
             merge_prompt = f"""### Instruction:
 You are a Chief Investment Officer.
-Synthesize the Technical and News analysis below to explain why the market moved as it did (Score: {true_score:.2f}).
+Synthesize the Technical and News analysis below to explain why the market moved as it did (Score: {true_score:.2f}) in a concise way (approx. 250 words).
 DO NOT OUTPUT "Scoring Rule" or dates. Provide a text analysis.
 
 ### Input:
+[Technical Analysis]
 {tech_analysis}
+
+[News Analysis]
 {news_analysis}
 
 ### Response:
 Merged Conclusion:
 """
             m_inputs = tokenizer([merge_prompt], return_tensors="pt").to("cuda")
-            m_outputs = model.generate(**m_inputs, max_new_tokens=1024, use_cache=True)
+            m_outputs = model.generate(
+                **m_inputs, 
+                max_new_tokens=400, 
+                use_cache=True,
+                repetition_penalty=1.2,
+                temperature=0.7,
+                do_sample=True
+            )
             m_text = tokenizer.batch_decode(m_outputs, skip_special_tokens=True)[0]
             merged_gen = m_text.split("### Response:")[-1].strip()
             if not merged_gen.lower().startswith("merged conclusion"):
