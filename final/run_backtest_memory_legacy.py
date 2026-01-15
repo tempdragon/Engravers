@@ -106,7 +106,9 @@ def get_llm_score(model, tokenizer, prompt):
     response_part = out_text.split("### Response:")[-1].strip()
     match = re.search(r"(?:Score:\s*)?([+\-]?\d+(\.\d+)?)", response_part)
     if match:
-        return float(match.group(1))
+        val = float(match.group(1))
+        # FIX: Clip score to sane range to prevent compounding explosions
+        return max(-5.0, min(5.0, val))
     return 0.0
 
 @contextmanager
@@ -202,18 +204,13 @@ def run_multistrat_backtest(args):
 
         # --- UPDATE MEMORIES ---
         with torch.no_grad():
-            # Robust Context Manager Fallback
             cm = None
-            try:
-                cm = model.disable_adapter()
-            except:
-                try:
-                    cm = model.disable_adapters()
-                except:
-                    pass
+            try: cm = model.disable_adapter() 
+            except: 
+                try: cm = model.disable_adapters()
+                except: pass
             
-            if cm is None:
-                cm = dummy_cm() # Use dummy if methods return None or fail
+            if cm is None: cm = dummy_cm()
 
             with cm:
                 # Update A: Standard Summary
@@ -291,7 +288,7 @@ News:
     summary_metrics = []
     plt.figure(figsize=(15, 8))
     
-    # Gold Benchmark (Corrected to use test period)
+    # Gold Benchmark
     gold_cum = (1 + test_gold_returns.fillna(0)).cumprod()
     final_gold = gold_cum.iloc[-1] - 1
     plt.plot(gold_cum.index, gold_cum, label=f"Gold B&H ({final_gold:.1%})", color="black", linestyle="--", linewidth=2, alpha=0.5)
@@ -353,8 +350,15 @@ News:
                 o_cum = orig_df.loc[common, "Cumulative_Strategy"]
                 o_final = o_cum.iloc[-1] - 1
                 
-                # Calc Original Alpha
+                # Calc Original Metrics
                 o_ret = o_cum.pct_change().dropna()
+                
+                # Sharpe
+                o_mean = o_ret.mean() * 252
+                o_std = o_ret.std() * np.sqrt(252)
+                o_sharpe = o_mean / o_std if o_std != 0 else 0
+                
+                # Alpha
                 g_ret_aligned = test_gold_returns.loc[o_ret.index].dropna()
                 c_idx = o_ret.index.intersection(g_ret_aligned.index)
                 if len(c_idx) > 10:
@@ -364,7 +368,7 @@ News:
 
                 plt.plot(common, o_cum, label=f"Original 5.1.4 ({o_final:.1%})", color="green", linestyle=":", linewidth=2)
                 print("-" * 95)
-                print(f"{('Original 5.1.4'):<25} | {o_final*100:6.1f}% | {'N/A':<6} | {'N/A':<7} | {alpha_o:6.2%}")
+                print(f"{('Original 5.1.4'):<25} | {o_final*100:6.1f}% | {o_sharpe:6.2f} | {'N/A':<7} | {alpha_o:6.2%}")
         except: pass
 
     plt.title("Top Strategies vs Gold vs Legacy")
