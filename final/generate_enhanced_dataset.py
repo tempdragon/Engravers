@@ -393,7 +393,7 @@ If your analysis contradicts the market reality, provide a reflection.
             tech_prompt = f"""### Instruction:
 You are a Senior Technical Analyst.
 The AI model predicted {pred_score}, but the Actual Market Score was {true_score:.2f} (Trend: {trend}).
-Analyze the Technical Indicators ONLY in a concise way (approx. 250 words).
+Analyze the Technical Indicators ONLY in a concise way (approx. 50 words).
 Explain if the Technical Context ({tech_context}) signaled a move that overpowered the news.
 DO NOT OUTPUT "Scoring Rule", dates, or conversational filler (e.g., "Note:", "I hope this helps").
 Provide strictly the analysis text.
@@ -425,7 +425,7 @@ Technical Analysis:
             news_prompt = f"""### Instruction:
 You are a Senior Macro Analyst.
 The AI model predicted {pred_score}, but the Actual Market Score was {true_score:.2f} (Trend: {trend}).
-Analyze the News Headlines ONLY in a concise way (approx. 400 words).
+Analyze the News Headlines ONLY in a concise way (approx. 50 words).
 Explain why the news might have been priced in, ignored, or interpreted differently by the market.
 DO NOT analyze headlines one by one. Provide ONE cohesive narrative analysis that aggregates the key themes.
 DO NOT OUTPUT "Scoring Rule", dates, or conversational filler (e.g., "Note:", "Here is the analysis").
@@ -456,7 +456,7 @@ News Analysis:
             # Step C: Merged Conclusion
             merge_prompt = f"""### Instruction:
 You are a Chief Investment Officer.
-Synthesize the Technical and News analysis below to explain why the market moved as it did (Score: {true_score:.2f}) in a concise way (approx. 250 words).
+Synthesize the Technical and News analysis below to explain why the market moved as it did (Score: {true_score:.2f}) in a concise way (approx. 50 words).
 DO NOT OUTPUT "Scoring Rule", dates, or conversational filler (e.g., "Note:", "This response adheres to ..."). Provide STRICTLY ONLY the analysis text.
 
 ### Input:
