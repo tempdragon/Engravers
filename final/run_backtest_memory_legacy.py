@@ -142,7 +142,6 @@ def run_multistrat_backtest(args):
         model_name = args.base_model, max_seq_length = 4096, dtype = None, load_in_4bit = True,
     )
     
-    # Fix for Local Adapter Loading
     adapter_path = args.model_path
     if os.path.isdir(adapter_path):
         adapter_path = os.path.abspath(adapter_path)
@@ -198,7 +197,26 @@ def run_multistrat_backtest(args):
 
         # --- UPDATE MEMORIES ---
         with torch.no_grad():
-            with model.disable_adapters():
+            # TRY to disable adapter. If NoneType error, assume model is already in base state or ignore.
+            # PEFT usually uses 'disable_adapter' (singular)
+            try:
+                cm = model.disable_adapter()
+            except AttributeError:
+                # If disable_adapter is missing, maybe it's disable_adapters (plural)
+                try:
+                    cm = model.disable_adapters()
+                except:
+                    cm = None
+            
+            # If cm is None, create a dummy context manager
+            if cm is None:
+                from contextlib import contextmanager
+                @contextmanager
+                def dummy_cm():
+                    yield
+                cm = dummy_cm()
+
+            with cm:
                 # Update A: Standard Summary
                 sum_prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 Identify single most important Gold event (Max 15 words) or 'None'.<|eot_id|><|start_header_id|>user<|end_header_id|>
