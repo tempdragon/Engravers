@@ -8,12 +8,14 @@ import json
 import os
 import argparse
 from datetime import timedelta
+import gc
 
 # Force offline mode for Hugging Face
 os.environ["HF_HUB_OFFLINE"] = "1"
 
 # ================= Configuration Defaults =================
 DEFAULT_MODEL_PATH = "/home/dragon/AI/llama-3-8B-4bit-finance"
+DEFAULT_REFLECTION_MODEL_PATH = "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
 DEFAULT_OUTPUT_FILE = "final/gold_llm_enhanced_train.jsonl"
 DEFAULT_NEWS_FILE = "final/gold_news_10years.csv"
 DEFAULT_CACHE_FILE = "commodity_data/gold.csv"
@@ -23,6 +25,7 @@ DEFAULT_DOWNLOAD_END_DATE = "2026-01-10"
 
 # Global variables to be populated by args
 MODEL_PATH = DEFAULT_MODEL_PATH
+REFLECTION_MODEL_PATH = DEFAULT_REFLECTION_MODEL_PATH
 OUTPUT_FILE = DEFAULT_OUTPUT_FILE
 NEWS_FILE = DEFAULT_NEWS_FILE
 CACHE_FILE = DEFAULT_CACHE_FILE
@@ -30,7 +33,7 @@ START_DATE = DEFAULT_START_DATE
 END_DATE = DEFAULT_END_DATE
 DOWNLOAD_END_DATE = DEFAULT_DOWNLOAD_END_DATE
 ENABLE_DOWNLOAD = False
-DEBUG_MODE = False  # Default debug mode
+DEBUG_MODE = False
 
 
 # ================= 1. Helper Functions for Tech Indicators =================
@@ -232,13 +235,17 @@ def prepare_data():
     return df_final
 
 
-# ================= 3. Model Generation & Reflection =================
+# ================= 3. Model Generation & Reflection (Two-Pass) =================
 def generate_enhanced_dataset():
     # Load Data
     df = prepare_data()
-
-    print(f"Loading previous model from {MODEL_PATH}...")
-    # Using Unsloth for fast inference
+    
+    intermediate_results = []
+    
+    # -------------------------------------------------------------------------
+    # PASS 1: Generate Scores with Finance Model
+    # -------------------------------------------------------------------------
+    print(f"\n[Pass 1/2] Loading Finance Model from {MODEL_PATH}...")
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=MODEL_PATH,
         max_seq_length=2048,
@@ -248,10 +255,6 @@ def generate_enhanced_dataset():
     )
     FastLanguageModel.for_inference(model)
 
-    results = []
-
-    print("Starting generation loop...")
-    # Define Prompt Template
     alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
 ### Instruction:
@@ -265,30 +268,8 @@ If your analysis contradicts the market reality, provide a reflection.
 
 ### Response:
 """
-
-    reflection_template = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
-
-### Instruction:
-You are a Senior Financial Analyst.
-The AI model predicted a sentiment score of {pred_score} based on the news, but the Actual Market Score was {true_score:.2f} (Trend: {trend}).
-The model prediction was incorrect.
-Analyze the provided News Headlines and Technical Indicators.
-Write a "Reflection" explaining why the market moved differently from the prediction.
-Your response MUST be structured with exactly these three sections:
-1. Technical Analysis: Analyze the technical indicators (RSI, BB, etc.).
-2. News Analysis: Analyze the news sentiment and why it might have been priced in or ignored.
-3. Merged Conclusion: Synthesize the two views to explain the market move.
-
-### Input:
-{input_text}
-
-### Response:
-[Reflection]
-Model Prediction: {pred_score}
-Actual Market Score: {true_score:.2f} ({trend})
-Analysis:
-"""
-
+    
+    print("Generating scores...")
     for date, row in tqdm(df.iterrows(), total=len(df)):
         # Construct Input String
         tech_str = (
@@ -300,7 +281,6 @@ Analysis:
 
         input_text = f"Date: {date.strftime('%Y-%m-%d')}\n\n[Technical Indicators]\n{tech_str}\n\n[News Headlines]\n{row['News_Text']}"
 
-        # 1. Run Inference to see what the *current* model thinks
         prompt = alpaca_prompt.format(input_text)
         inputs = tokenizer([prompt], return_tensors="pt").to("cuda")
 
@@ -308,13 +288,10 @@ Analysis:
         outputs = model.generate(**inputs, max_new_tokens=64, use_cache=True)
         pred_text = tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
 
-        # Extract predicted score (naive parsing)
-        # Assuming model outputs "Score: X"
+        # Extract predicted score
         try:
             pred_part = pred_text.split("### Response:")[-1].strip()
-            # Look for number
             import re
-
             match = re.search(r"Score:\s*(-?\d+(\.\d+)?)", pred_part)
             if match:
                 pred_score = float(match.group(1))
@@ -323,23 +300,79 @@ Analysis:
         except:
             pred_score = 0
 
-        true_score = row["Calculated_Score"]
-
-        # 2. Logic: Result too different?
-        diff = abs(pred_score - true_score)
-
-        final_response = f"Score: {true_score:.2f}"
-
-        # Construct technical context string for the rationale
-        # Simple trend logic for the text
-        trend = (
-            "bullish" if true_score > 1 else "bearish" if true_score < -1 else "neutral"
+        # Store for Pass 2
+        intermediate_results.append({
+            "date": date,
+            "row": row,
+            "input_text": input_text,
+            "pred_score": pred_score,
+            "true_score": row["Calculated_Score"],
+            "tech_str": tech_str,
+            "news_text": row["News_Text"]
+        })
+        
+        # In Debug Mode, just process one item for Pass 1 then break
+        if DEBUG_MODE and len(intermediate_results) > 0:
+             # We want to find a FAIL case for debug. If prediction is close, skip/continue until fail?
+             # User asked to "Stopped at first 'Failed Reflection'".
+             # So we need to check condition here.
+             diff = abs(pred_score - row["Calculated_Score"])
+             if diff > 2.0:
+                 print("Found a failure case for debug. Stopping Pass 1.")
+                 break
+             else:
+                 # If passing, clear list and continue searching? 
+                 # Or keep collecting until we hit a fail? 
+                 # Let's keep collecting, but we only really need the LAST one if we break.
+                 # Actually, for debug mode efficiency, let's just find the first failure.
+                 if len(intermediate_results) > 10: # Safety break if model is too good
+                     print("Model too good or no failures in first 10. Stopping Pass 1.")
+                     break
+                 
+    
+    # FREE MEMORY
+    print("\nUnloading Finance Model to free VRAM...")
+    del model
+    del tokenizer
+    torch.cuda.empty_cache()
+    gc.collect()
+    
+    # -------------------------------------------------------------------------
+    # PASS 2: Generate Reflections with Base Model
+    # -------------------------------------------------------------------------
+    print(f"\n[Pass 2/2] Loading Reflection Model from {REFLECTION_MODEL_PATH}...")
+    try:
+         model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=REFLECTION_MODEL_PATH,
+            max_seq_length=2048,
+            dtype=None,
+            load_in_4bit=True,
+            local_files_only=True,
         )
+    except Exception as e:
+        print(f"Failed to load reflection model {REFLECTION_MODEL_PATH}: {e}")
+        return # Cannot proceed
+
+    FastLanguageModel.for_inference(model)
+    
+    final_dataset = []
+    
+    print("Generating reflections...")
+    for item in tqdm(intermediate_results):
+        pred_score = item["pred_score"]
+        true_score = item["true_score"]
+        row = item["row"]
+        tech_str = item["tech_str"]
+        news_text = item["news_text"]
+        
+        diff = abs(pred_score - true_score)
+        
+        trend = "bullish" if true_score > 1 else "bearish" if true_score < -1 else "neutral"
         tech_context = f"RSI ({row['RSI']:.1f}) and BB %B ({row['Percent_B']:.2f})"
-
-        if diff > 2.0:  # Threshold for "Too Different"
-            # Generate Reflection (Correction) using LLM in 3 SEPARATE steps
-
+        
+        final_response = f"Score: {true_score:.2f}"
+        
+        if diff > 2.0:
             # Step A: Technical Reflection
             tech_prompt = f"""### Instruction:
 You are a Senior Technical Analyst.
@@ -357,7 +390,12 @@ Technical Analysis:
             t_inputs = tokenizer([tech_prompt], return_tensors="pt").to("cuda")
             t_outputs = model.generate(**t_inputs, max_new_tokens=150, use_cache=True)
             t_text = tokenizer.batch_decode(t_outputs, skip_special_tokens=True)[0]
-            tech_analysis = t_text.split("### Response:")[-1].strip()
+            # Ensure "Technical Analysis:" prefix is preserved or re-added if missing from generation
+            tech_gen = t_text.split("### Response:")[-1].strip()
+            if not tech_gen.lower().startswith("technical analysis"):
+                tech_analysis = "Technical Analysis:\n" + tech_gen
+            else:
+                tech_analysis = tech_gen
 
             # Step B: News Reflection
             news_prompt = f"""### Instruction:
@@ -368,7 +406,7 @@ Explain why the news might have been priced in, ignored, or interpreted differen
 DO NOT OUTPUT "Scoring Rule" or dates. Provide a LONG text analysis that REFERS TO THE NEWS and GIVE REASONS WHY the news didn't make the movement of the commodity move in the expected direction as well as what the analysis may have over or underestimated or ignored.
 
 ### Input:
-{row['News_Text']}
+{news_text}
 
 ### Response:
 News Analysis:
@@ -376,7 +414,11 @@ News Analysis:
             n_inputs = tokenizer([news_prompt], return_tensors="pt").to("cuda")
             n_outputs = model.generate(**n_inputs, max_new_tokens=150, use_cache=True)
             n_text = tokenizer.batch_decode(n_outputs, skip_special_tokens=True)[0]
-            news_analysis = n_text.split("### Response:")[-1].strip()
+            news_gen = n_text.split("### Response:")[-1].strip()
+            if not news_gen.lower().startswith("news analysis"):
+                news_analysis = "News Analysis:\n" + news_gen
+            else:
+                news_analysis = news_gen
 
             # Step C: Merged Conclusion
             merge_prompt = f"""### Instruction:
@@ -394,7 +436,11 @@ Merged Conclusion:
             m_inputs = tokenizer([merge_prompt], return_tensors="pt").to("cuda")
             m_outputs = model.generate(**m_inputs, max_new_tokens=150, use_cache=True)
             m_text = tokenizer.batch_decode(m_outputs, skip_special_tokens=True)[0]
-            merged_analysis = m_text.split("### Response:")[-1].strip()
+            merged_gen = m_text.split("### Response:")[-1].strip()
+            if not merged_gen.lower().startswith("merged conclusion"):
+                merged_analysis = "Merged Conclusion:\n" + merged_gen
+            else:
+                merged_analysis = merged_gen
 
             generated_reflection = (
                 f"[Reflection]\n"
@@ -405,22 +451,20 @@ Merged Conclusion:
                 f"2. {news_analysis}\n"
                 f"3. {merged_analysis}"
             )
-
-            # Debug Mode: Print reflection and exit on first failure
+            
             if DEBUG_MODE:
                 print("\n" + "=" * 50)
-                print(
-                    "🛑 DEBUG MODE: Stopped at first 'Failed Reflection' (Incorrect Prediction)"
-                )
+                print("🛑 DEBUG MODE: Stopped at first 'Failed Reflection'")
                 print("=" * 50)
-                print(f"Date: {date.strftime('%Y-%m-%d')}")
+                print(f"Date: {item['date'].strftime('%Y-%m-%d')}")
                 print(f"Pred: {pred_score} | Actual: {true_score:.2f}")
                 print("-" * 20)
                 print(generated_reflection)
                 print("=" * 50 + "\n")
-                return  # Stop execution immediately
+                return 
 
             final_response += f"\n\n{generated_reflection}"
+        
         else:
             # Generate Rationale (Confirmation)
             rationale_note = (
@@ -430,24 +474,21 @@ Merged Conclusion:
                 f"3. Conclusion: Strong convergence between macro sentiment and technical structure."
             )
             final_response += rationale_note
-
-        # 3. Create JSONL Entry
-        # The 'output' we want the model to learn is the CORRECT score + the Reflection (if needed)
-        # So next time it learns to reason correctly.
-
+            
         entry = {
             "instruction": "You are a Macro Quant Strategist specializing in Gold (XAU/USD). Analyze the given news and technical indicators for the day. Provide a Daily Sentiment Score (-5 to +5) and technical rationale.",
-            "input": input_text,
+            "input": item["input_text"],
             "output": final_response,
         }
-        results.append(entry)
+        final_dataset.append(entry)
 
     # Save
-    print(f"Saving {len(results)} rows to {OUTPUT_FILE}...")
-    with open(OUTPUT_FILE, "w") as f:
-        for item in results:
-            f.write(json.dumps(item) + "\n")
-    print("Done!")
+    if not DEBUG_MODE:
+        print(f"Saving {len(final_dataset)} rows to {OUTPUT_FILE}...")
+        with open(OUTPUT_FILE, "w") as f:
+            for item in final_dataset:
+                f.write(json.dumps(item) + "\n")
+        print("Done!")
 
 
 if __name__ == "__main__":
@@ -461,7 +502,7 @@ if __name__ == "__main__":
         "--model-path",
         type=str,
         default=DEFAULT_MODEL_PATH,
-        help="Path to the model directory",
+        help="Path to the finance model directory",
     )
     parser.add_argument(
         "--output-file",
@@ -472,7 +513,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--news-file", type=str, default=DEFAULT_NEWS_FILE, help="Path to news CSV file"
     )
-    # Scored file argument removed as we calculate scores dynamically
     parser.add_argument(
         "--cache-file",
         type=str,
@@ -508,7 +548,6 @@ if __name__ == "__main__":
     MODEL_PATH = args.model_path
     OUTPUT_FILE = args.output_file
     NEWS_FILE = args.news_file
-    # SCORED_FILE removed
     CACHE_FILE = args.cache_file
     START_DATE = args.start_date
     END_DATE = args.end_date
