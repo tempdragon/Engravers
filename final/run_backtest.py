@@ -420,6 +420,10 @@ Memory_Update: [Brief Summary]"""
 
     strategy_df["Strategy_Ret"] = strategy_df["Position"] * strategy_df["Gold_Ret"]
 
+    # Cumulative
+    strategy_df["Cum_Gold"] = (1 + strategy_df["Gold_Ret"].fillna(0)).cumprod()
+    strategy_df["Cum_Strategy"] = (1 + strategy_df["Strategy_Ret"].fillna(0)).cumprod()
+
     # Calculate Drawdown for Strategy
     cum_max = strategy_df["Cum_Strategy"].cummax()
     drawdown = (strategy_df["Cum_Strategy"] - cum_max) / cum_max
