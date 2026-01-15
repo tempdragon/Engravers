@@ -404,7 +404,7 @@ DO NOT OUTPUT "Scoring Rule" or dates. Provide a text analysis.
 Technical Analysis:
 """
             t_inputs = tokenizer([tech_prompt], return_tensors="pt").to("cuda")
-            t_outputs = model.generate(**t_inputs, max_new_tokens=150, use_cache=True)
+            t_outputs = model.generate(**t_inputs, max_new_tokens=1024, use_cache=True)
             t_text = tokenizer.batch_decode(t_outputs, skip_special_tokens=True)[0]
             # Ensure "Technical Analysis:" prefix is preserved or re-added if missing from generation
             tech_gen = t_text.split("### Response:")[-1].strip()
@@ -428,7 +428,7 @@ DO NOT OUTPUT "Scoring Rule" or dates. Provide a LONG text analysis that REFERS 
 News Analysis:
 """
             n_inputs = tokenizer([news_prompt], return_tensors="pt").to("cuda")
-            n_outputs = model.generate(**n_inputs, max_new_tokens=150, use_cache=True)
+            n_outputs = model.generate(**n_inputs, max_new_tokens=1024, use_cache=True)
             n_text = tokenizer.batch_decode(n_outputs, skip_special_tokens=True)[0]
             news_gen = n_text.split("### Response:")[-1].strip()
             if not news_gen.lower().startswith("news analysis"):
@@ -450,7 +450,7 @@ DO NOT OUTPUT "Scoring Rule" or dates. Provide a text analysis.
 Merged Conclusion:
 """
             m_inputs = tokenizer([merge_prompt], return_tensors="pt").to("cuda")
-            m_outputs = model.generate(**m_inputs, max_new_tokens=150, use_cache=True)
+            m_outputs = model.generate(**m_inputs, max_new_tokens=1024, use_cache=True)
             m_text = tokenizer.batch_decode(m_outputs, skip_special_tokens=True)[0]
             merged_gen = m_text.split("### Response:")[-1].strip()
             if not merged_gen.lower().startswith("merged conclusion"):
