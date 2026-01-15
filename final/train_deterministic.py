@@ -4,16 +4,17 @@ from unsloth import FastLanguageModel
 from datasets import load_dataset
 from trl import SFTTrainer
 from transformers import TrainingArguments
+from peft import PeftModel
 
 # ================= Configuration =================
-# 1. Point to the ORIGINAL Base Model (Unsloth needs this first)
 BASE_MODEL_NAME = "unsloth/llama-3-8b-bnb-4bit"
 
-# 2. Path to your EXISTING Fine-tuned Adapter (The Checkpoint)
-# This assumes the path on the server.
-ADAPTER_PATH = "/root/Engravers/llama3_gold_quant_checkpoint" 
+# Path to your EXISTING Fine-tuned Adapter
+# Try relative path first if CWD is /root/Engravers
+ADAPTER_PATH = "llama3_gold_quant_checkpoint"
+# Fallback to absolute if needed, or check both
+ADAPTER_PATH_ABS = "/root/Engravers/llama3_gold_quant_checkpoint"
 
-# 3. Data and Output
 DATA_FILE = "final/gold_pure_deterministic_train.jsonl"
 OUTPUT_DIR = "final/llama3_gold_deterministic_checkpoint"
 
@@ -24,7 +25,7 @@ LOAD_IN_4BIT = True
 def train():
     print(f"🔥 Starting Deterministic Fine-tuning...")
     print(f"   Base Model: {BASE_MODEL_NAME}")
-    print(f"   Adapter:    {ADAPTER_PATH}")
+    print(f"   Target Adapter: {ADAPTER_PATH}")
     print(f"   Data:       {DATA_FILE}")
     print(f"   Output:     {OUTPUT_DIR}")
     print(f"   GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
@@ -32,24 +33,53 @@ def train():
     # 1. Load the ORIGINAL Base Model
     print("\n[1/5] Loading Base Model...")
     model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name = BASE_MODEL_NAME, # Load Llama-3 base first
+        model_name = BASE_MODEL_NAME,
         max_seq_length = MAX_SEQ_LENGTH,
         dtype = DTYPE,
         load_in_4bit = LOAD_IN_4BIT,
     )
 
     # 2. Load the Existing Adapter (Checkpoint)
-    print(f"\n[2/5] Loading Existing Adapter from {ADAPTER_PATH}...")
+    print(f"\n[2/5] Loading Existing Adapter...")
+    
+    # Check paths
+    final_adapter_path = None
+    if os.path.exists(ADAPTER_PATH) and os.path.isdir(ADAPTER_PATH):
+        final_adapter_path = ADAPTER_PATH
+    elif os.path.exists(ADAPTER_PATH_ABS) and os.path.isdir(ADAPTER_PATH_ABS):
+        final_adapter_path = ADAPTER_PATH_ABS
+    
+    if not final_adapter_path:
+        raise FileNotFoundError(f"❌ Could not find adapter directory at '{ADAPTER_PATH}' or '{ADAPTER_PATH_ABS}'")
+
+    print(f"   Found adapter at: {final_adapter_path}")
+
+    # Try loading adapter
     try:
-        model.load_adapter(ADAPTER_PATH)
-        print("   ✅ Adapter loaded successfully!")
+        # Unsloth/Peft load_adapter
+        model.load_adapter(final_adapter_path)
+        print("   ✅ Adapter loaded successfully via model.load_adapter()!")
     except Exception as e:
-        print(f"   ⚠️ Warning: Could not load adapter directly: {e}")
-        print("   Continuing with base model only (fresh start)...")
+        print(f"   ⚠️ model.load_adapter() failed: {e}")
+        print("   🔄 Attempting fallback using PeftModel.from_pretrained...")
+        try:
+            # Fallback: Explicit PeftModel load
+            # Note: This wraps the model. Unsloth should handle it, but it might break some Unsloth optimizations if not careful.
+            # But usually it's fine for further training.
+            model = PeftModel.from_pretrained(model, final_adapter_path, is_trainable=True)
+            print("   ✅ Adapter loaded successfully via PeftModel!")
+        except Exception as e2:
+            raise RuntimeError(f"❌ FATAL: Could not load adapter! Error: {e2}")
 
     # 3. Configure LoRA for FURTHER Training
-    # We need to ensure the model is in training mode. 
-    print("\n[2.5/5] ensuring model is trainable...")
+    # Important: If we loaded an adapter, we usually just want to enable gradients on it.
+    # Unsloth's get_peft_model creates a NEW adapter config if one doesn't exist, or might overwrite?
+    # Actually, for continuous training, we often just want to ensure the loaded adapter is trainable.
+    
+    # However, to be safe and use Unsloth's optimized training loop, we can re-apply the config.
+    # The 'get_peft_model' call is generally idempotent or additive.
+    
+    print("\n[2.5/5] Refreshing LoRA Config for Training...")
     model = FastLanguageModel.get_peft_model(
         model,
         r = 64, 
