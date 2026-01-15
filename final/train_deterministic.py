@@ -11,10 +11,9 @@ BASE_MODEL_NAME = "unsloth/llama-3-8b-bnb-4bit"
 
 # Path to your EXISTING Fine-tuned Adapter
 # Try relative path first if CWD is /root/Engravers
-ADAPTER_PATH = "llama3_gold_quant_checkpoint"
+ADAPTER_PATH = "llama3_gold_quant_checkpoint" 
 # Fallback to absolute if needed, or check both
-ADAPTER_PATH_ABS = "/root/Engravers/llama3_gold_quant_checkpoint"
-
+ADAPTER_PATH_ABS = "/root/llama3_gold_quant_checkpoint"
 DATA_FILE = "final/gold_pure_deterministic_train.jsonl"
 OUTPUT_DIR = "final/llama3_gold_deterministic_checkpoint"
 
