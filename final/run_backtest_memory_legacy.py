@@ -165,6 +165,17 @@ def dummy_cm():
 
 # ================= 2. Multi-Strategy Logic =================
 def run_multistrat_backtest(args):
+    # Auto-adjust output filenames based on fee setting
+    if args.fee > 0:
+        suffix = "_fee"
+        root_csv, ext_csv = os.path.splitext(args.output_csv)
+        if not root_csv.endswith(suffix):
+            args.output_csv = f"{root_csv}{suffix}{ext_csv}"
+
+        root_chart, ext_chart = os.path.splitext(args.output_chart)
+        if not root_chart.endswith(suffix):
+            args.output_chart = f"{root_chart}{suffix}{ext_chart}"
+
     # 1. Setup
     df_daily, gold_price = prepare_daily_data(args.news_file, args.cache_file)
 
