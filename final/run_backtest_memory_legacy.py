@@ -166,7 +166,7 @@ def dummy_cm():
 # ================= 2. Multi-Strategy Logic =================
 def run_multistrat_backtest(args):
     # Auto-adjust output filenames based on fee setting
-    if args.fee > 0:
+    if args.long_fee > 0 or args.short_fee > 0:
         suffix = "_fee"
         root_csv, ext_csv = os.path.splitext(args.output_csv)
         if not root_csv.endswith(suffix):
@@ -572,7 +572,10 @@ News:
         # Calculate Turnover and Fees
         # Assume starting position is 0
         pos_change = s_pos.diff().fillna(s_pos)
-        costs = pos_change.abs() * args.fee
+        
+        # Apply Long Fee to BUYS (pos_change > 0) and Short Fee to SELLS (pos_change < 0)
+        costs = (pos_change.clip(lower=0) * args.long_fee) + \
+                (pos_change.clip(upper=0).abs() * args.short_fee)
         
         strat_ret = (s_pos * aligned_gold) - costs
         strat_cum = (1 + strat_ret.fillna(0)).cumprod()
@@ -681,6 +684,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--original-csv", type=str, default=DEFAULT_ORIGINAL_STRATEGY_CSV
     )
-    parser.add_argument("--fee", type=float, default=0.01, help="Transaction fee per trade (default: 0.01 = 1%)")
+    parser.add_argument("--long-fee", type=float, default=0.00333, help="Transaction fee per LONG trade (default: 0.00333)")
+    parser.add_argument("--short-fee", type=float, default=0.0055, help="Transaction fee per SHORT trade (default: 0.0055)")
     args = parser.parse_args()
     run_multistrat_backtest(args)
