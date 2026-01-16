@@ -610,11 +610,16 @@ News:
         
         # Calculate Turnover and Fees
         # Assume starting position is 0
-        pos_change = s_pos.diff().fillna(s_pos)
+        prev_pos = s_pos.shift(1).fillna(0)
         
-        # Apply Long Fee to BUYS (pos_change > 0) and Short Fee to SELLS (pos_change < 0)
-        costs = (pos_change.clip(lower=0) * args.long_fee) + \
-                (pos_change.clip(upper=0).abs() * args.short_fee)
+        # Decompose changes into Long-side (Positive domain) and Short-side (Negative domain) activity
+        # 1. Volume executed in the positive range (Opening/Closing Longs)
+        long_vol = (s_pos.clip(lower=0) - prev_pos.clip(lower=0)).abs()
+        
+        # 2. Volume executed in the negative range (Opening/Closing Shorts)
+        short_vol = (s_pos.clip(upper=0) - prev_pos.clip(upper=0)).abs()
+        
+        costs = (long_vol * args.long_fee) + (short_vol * args.short_fee)
         
         strat_ret = (s_pos * aligned_gold) - costs
         strat_cum = (1 + strat_ret.fillna(0)).cumprod()
